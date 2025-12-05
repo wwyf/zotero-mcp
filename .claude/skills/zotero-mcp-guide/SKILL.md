@@ -1,6 +1,6 @@
 ---
 name: zotero-mcp-guide
-description: Guide for using Zotero library via MCP tools. Covers searching items (semantic, keyword, tag-based), retrieving full text and metadata, managing collections and tags, working with annotations and notes, and exporting citations. Use when users need to find papers, read paper content, view annotations/highlights, organize research, search their library, or work with their Zotero reference manager.
+description: "MUST invoke this skill before using ANY mcp__zotero__ tools. This skill provides essential best practices for Zotero MCP usage: multi-strategy search patterns, context-efficient sub-agent workflows, and progressive retrieval. Triggers: (1) Any mention of Zotero, papers, citations, references, library (2) Any use of mcp__zotero__* tools (3) Research questions about academic papers (4) Finding, reading, or analyzing papers. Always follow this guide's patterns to avoid context bloat from long paper fulltexts."
 ---
 
 # Zotero MCP Guide
@@ -11,26 +11,83 @@ Access and manage Zotero libraries through MCP tools. All tools are prefixed wit
 
 For comprehensive research queries, use the **dual search + orchestrated analysis** pattern.
 
-### Phase 1: Discovery (Main Context)
+### Phase 1: Discovery (Search Sub-Agent)
+
+Spawn a search sub-agent to run all searches in parallel:
 
 ```
-1. KEYWORD EXTRACTION from user's question:
-   - Original keywords: user's exact terms
-   - Generated keywords: synonyms, related terms, acronyms
+Task(
+  subagent_type="general-purpose",
+  prompt="""
+  Search Zotero library for: "{USER_QUESTION}"
 
-2. DUAL SEARCH (run in parallel):
-   - zotero_semantic_search(query="user question", limit=10)
-   - zotero_search_items(query="keywords", qmode="everything", limit=10)
+  STEP 1: Extract search terms
+  - Original query: full user question
+  - Segments: key phrases from query
+  - Keywords: individual important terms
+  - Generated: synonyms, related terms, acronyms
 
-3. MERGE & DEDUPLICATE by item_key
+  STEP 2: Run ALL searches in PARALLEL
 
-4. GET METADATA for candidates:
-   - zotero_get_item_metadata for top results (includes abstracts)
+  a) Semantic search:
+     - mcp__zotero__zotero_semantic_search(query="user question", limit=10)
 
-5. PRESENT CANDIDATES to user:
-   - Show title, authors, year, abstract snippet
-   - Let user select which papers to analyze
+  b) Keyword searches (3 tiers × 4 query types = 12 searches):
+
+     TIER 1 - titleCreatorYear (title/creator/year):
+     - mcp__zotero__zotero_search_items(query="original", qmode="titleCreatorYear")
+     - mcp__zotero__zotero_search_items(query="segment", qmode="titleCreatorYear")
+     - mcp__zotero__zotero_search_items(query="kw1 OR kw2", qmode="titleCreatorYear")
+     - mcp__zotero__zotero_search_items(query="kw1 AND kw2", qmode="titleCreatorYear")
+
+     TIER 2 - allfield (all metadata):
+     - mcp__zotero__zotero_search_items(query="original", qmode="allfield")
+     - mcp__zotero__zotero_search_items(query="segment", qmode="allfield")
+     - mcp__zotero__zotero_search_items(query="kw1 OR kw2", qmode="allfield")
+     - mcp__zotero__zotero_search_items(query="kw1 AND kw2", qmode="allfield")
+
+     TIER 3 - everything (includes fulltext):
+     - mcp__zotero__zotero_search_items(query="original", qmode="everything")
+     - mcp__zotero__zotero_search_items(query="segment", qmode="everything")
+     - mcp__zotero__zotero_search_items(query="kw1 OR kw2", qmode="everything")
+     - mcp__zotero__zotero_search_items(query="kw1 AND kw2", qmode="everything")
+
+  STEP 3: Merge & deduplicate by item_key
+
+  STEP 4: Get metadata for top candidates
+     - mcp__zotero__zotero_get_item_metadata for each unique item
+
+  RETURN: List of candidates with:
+  - item_key, title, authors, year, abstract snippet
+  - Which search strategies found each paper (helps understand relevance)
+  """,
+  description="Search library: {SHORT_QUERY}"
+)
 ```
+
+### Main Context: Present to User
+
+After search sub-agent returns:
+```
+1. Present candidates to user:
+   - Show title, authors, year, abstract
+   - Indicate how paper was found (semantic/keyword/both)
+
+2. Let user select which papers to analyze
+```
+
+**Example Search Matrix:**
+
+User query: "How does KV cache eviction work in LLM serving?"
+
+| Tier | Query Type | Example |
+|------|------------|---------|
+| titleCreatorYear | Original | "KV cache eviction LLM serving" |
+| titleCreatorYear | Segment | "KV cache eviction" |
+| titleCreatorYear | OR | "cache OR eviction OR LRU" |
+| titleCreatorYear | AND | "cache AND LLM" |
+| allfield | ... | (same patterns) |
+| everything | ... | (same patterns) |
 
 ### Phase 2: Analysis (Orchestrator Sub-Agent)
 
@@ -75,13 +132,14 @@ Task(
 |-------------|-------|--------|
 | Semantic only | Conceptually related | Exact terms, rare mentions |
 | Keyword only | Exact matches | Synonyms, related concepts |
-| **Dual search** | Both | Minimal |
+| **Multi-strategy** | Both + incremental depth | Minimal |
 
-| Context Location | Cost | Best For |
-|------------------|------|----------|
-| Main context | Preserved | Search results, user interaction |
-| Orchestrator | Medium | Coordination, synthesis |
-| Workers (parallel) | Isolated | Heavy fulltext processing |
+| Sub-Agent | Role | Context |
+|-----------|------|---------|
+| Search agent | 13 parallel searches, merge, dedupe | Isolated |
+| Main context | Present candidates, user selection | Preserved |
+| Orchestrator | Coordinate paper analysis | Medium |
+| Workers | Fulltext processing (3 papers each) | Isolated |
 
 ## Quick Workflows
 
