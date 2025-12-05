@@ -312,10 +312,10 @@ def get_attachment_details(
 def convert_to_markdown(file_path: Union[str, Path]) -> str:
     """
     Convert a file to markdown using markitdown library.
-    
+
     Args:
         file_path: Path to the file to convert.
-        
+
     Returns:
         Markdown text.
     """
@@ -325,3 +325,87 @@ def convert_to_markdown(file_path: Union[str, Path]) -> str:
         return result.text_content
     except Exception as e:
         return f"Error converting file to markdown: {str(e)}"
+
+
+def get_zotero_data_dir() -> Optional[Path]:
+    """
+    Get the Zotero data directory from config, environment, or auto-detect.
+
+    Checks in order:
+    1. ZOTERO_DATA_DIR environment variable
+    2. zotero_db_path from ~/.config/zotero-mcp/config.json (parent directory)
+    3. Auto-detect based on OS (~/Zotero)
+
+    Returns:
+        Path to Zotero data directory, or None if not found.
+    """
+    import platform
+    import json
+
+    # First check environment variable
+    env_path = os.getenv("ZOTERO_DATA_DIR")
+    if env_path:
+        path = Path(env_path)
+        if path.exists():
+            return path
+
+    # Check zotero-mcp config file for zotero_db_path
+    config_path = Path.home() / ".config" / "zotero-mcp" / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            db_path = config.get("semantic_search", {}).get("zotero_db_path")
+            if db_path:
+                # Data directory is the parent of the database file
+                data_dir = Path(db_path).parent
+                if data_dir.exists():
+                    return data_dir
+        except Exception:
+            pass
+
+    # Auto-detect based on OS
+    system = platform.system()
+    if system == "Darwin":  # macOS
+        data_dir = Path.home() / "Zotero"
+    elif system == "Windows":
+        data_dir = Path.home() / "Zotero"
+    else:  # Linux and others
+        data_dir = Path.home() / "Zotero"
+
+    if data_dir.exists():
+        return data_dir
+
+    return None
+
+
+def get_local_fulltext_cache(attachment_key: str, zotero_data_dir: Optional[Path] = None) -> Optional[str]:
+    """
+    Read fulltext content from Zotero's local .zotero-ft-cache file.
+
+    Zotero stores indexed fulltext in .zotero-ft-cache files within each
+    attachment's storage folder.
+
+    Args:
+        attachment_key: The Zotero attachment key (e.g., "TVNCNGWB")
+        zotero_data_dir: Optional path to Zotero data directory. If None, auto-detect.
+
+    Returns:
+        Fulltext content as string, or None if not found.
+    """
+    if zotero_data_dir is None:
+        zotero_data_dir = get_zotero_data_dir()
+
+    if zotero_data_dir is None:
+        return None
+
+    storage_dir = zotero_data_dir / "storage"
+    cache_file = storage_dir / attachment_key / ".zotero-ft-cache"
+
+    if cache_file.exists():
+        try:
+            return cache_file.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            pass
+
+    return None

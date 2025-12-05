@@ -22,6 +22,7 @@ from zotero_mcp.client import (
     format_item_metadata,
     generate_bibtex,
     get_attachment_details,
+    get_local_fulltext_cache,
     get_zotero_client,
 )
 from zotero_mcp.utils import format_creators
@@ -331,27 +332,37 @@ def get_item_fulltext(
         
         ctx.info(f"Found attachment: {attachment.key} ({attachment.content_type})")
         
-        # Try fetching full text from Zotero's full text index first
+        # Try fetching full text from Zotero's full text index first (API)
         try:
             full_text_data = zot.fulltext_item(attachment.key)
             if full_text_data and "content" in full_text_data and full_text_data["content"]:
-                ctx.info("Successfully retrieved full text from Zotero's index")
+                ctx.info("Successfully retrieved full text from Zotero's API index")
                 return f"{metadata}\n\n---\n\n## Full Text\n\n{full_text_data['content']}"
         except Exception as fulltext_error:
-            ctx.info(f"Couldn't retrieve indexed full text: {str(fulltext_error)}")
-        
-        # If we couldn't get indexed full text, try to download and convert the file
+            ctx.info(f"Couldn't retrieve indexed full text from API: {str(fulltext_error)}")
+
+        # Try reading from local .zotero-ft-cache file
+        try:
+            ctx.info(f"Attempting to read local fulltext cache for attachment {attachment.key}")
+            local_fulltext = get_local_fulltext_cache(attachment.key)
+            if local_fulltext:
+                ctx.info("Successfully retrieved full text from local .zotero-ft-cache")
+                return f"{metadata}\n\n---\n\n## Full Text\n\n{local_fulltext}"
+        except Exception as local_cache_error:
+            ctx.info(f"Couldn't retrieve local fulltext cache: {str(local_cache_error)}")
+
+        # Fall back to downloading and converting the file (may fail for linked files)
         try:
             ctx.info(f"Attempting to download and convert attachment {attachment.key}")
-            
+
             # Download the file to a temporary location
             import tempfile
             import os
-            
+
             with tempfile.TemporaryDirectory() as tmpdir:
                 file_path = os.path.join(tmpdir, attachment.filename or f"{attachment.key}.pdf")
                 zot.dump(attachment.key, filename=os.path.basename(file_path), path=tmpdir)
-                
+
                 if os.path.exists(file_path):
                     ctx.info(f"Downloaded file to {file_path}, converting to markdown")
                     converted_text = convert_to_markdown(file_path)
